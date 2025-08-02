@@ -12,9 +12,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QMessageBox,
+    QSystemTrayIcon,
+    QMenu,
+    QApplication,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QPixmap, QTransform, QColor
+from PySide6.QtGui import QPainter, QPixmap, QTransform, QColor, QIcon
 from .audio import AudioManager
 from .settings_dialog import SettingsDialog
 
@@ -60,11 +63,11 @@ class RotatingDisc(QWidget):
             self.target_speed = 0.0
         else:
             normalized = min(1.0, max(0.0, (db_level + 60) / 60))
-            self.target_speed = normalized * 30.0 * self._disc_sensitivity
+            self.target_speed = normalized * 60.0 * self._disc_sensitivity
 
     def _update_rotation(self) -> None:
         speed_diff = self.target_speed - self.current_speed
-        smoothing = 0.02 + (0.48 * (1.0 - self._disc_inertia))
+        smoothing = 0.005 + (0.48 * (1.0 - self._disc_inertia))
         self.current_speed += speed_diff * smoothing
         self.rotation_angle += self.current_speed
         if self.rotation_angle >= 360:
@@ -168,6 +171,41 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._connect_signals()
         self._load_and_apply_settings()
+        self._init_tray()
+
+    def _init_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "disc.png")
+        self.tray_icon = QSystemTrayIcon(QIcon(icon_path), self)
+        self.tray_icon.setToolTip("CD-AUX mini — клик, чтобы открыть")
+
+        menu = QMenu()
+        action_show = menu.addAction("Открыть окно")
+        action_quit = menu.addAction("Выйти")
+
+        action_show.triggered.connect(self._show_from_tray)
+        action_quit.triggered.connect(self._quit_app)
+
+        self.tray_icon.setContextMenu(menu)
+
+        self.tray_icon.activated.connect(
+            lambda reason: self._show_from_tray()
+            if reason == QSystemTrayIcon.Trigger
+            else None
+        )
+
+        self.tray_icon.show()
+
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_app(self) -> None:
+        self.tray_icon.hide()
+        QApplication.quit()
 
     def _apply_dark_theme(self) -> None:
         self.setStyleSheet(
@@ -221,5 +259,18 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def closeEvent(self, event) -> None:
-        self.audio_manager.stop_stream()
-        event.accept()
+        if hasattr(self, "tray_icon") and self.tray_icon.isVisible():
+            self.hide()
+            self.tray_icon.showMessage(
+                "CD-AUX mini",
+                "Приложение продолжает работать в трее.\n"
+                "Кликните по иконке, чтобы вернуть окно.",
+                QSystemTrayIcon.Information,
+                3000,
+            )
+            event.ignore()
+        else:
+            self.audio_manager.stop_stream()
+            event.accept()
+
+

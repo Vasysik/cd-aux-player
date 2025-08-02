@@ -5,6 +5,7 @@ from app.ui import MainWindow
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("CD-AUX mini")
     app.setApplicationVersion("1.0.0")
     app.setStyle("Fusion")

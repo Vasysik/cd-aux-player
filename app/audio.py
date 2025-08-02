@@ -122,15 +122,15 @@ class AudioManager(QObject):
             self._gain = 0.0
         else:
             normalized = gain_percent / 50.0
+            sensitivity_factor = 0.3 + (self._volume_sensitivity * 0.7)
             
             if normalized <= 1.0:
-                self._gain = normalized ** 2
+                self._gain = (normalized ** 2) * sensitivity_factor
             else:
-                max_boost = 1.0 + (self._volume_sensitivity * 1.5)
-                self._gain = 1.0 + ((normalized - 1.0) * (max_boost - 1.0))
+                max_boost = 1.0 + (self._volume_sensitivity * 3.0)
+                self._gain = sensitivity_factor + ((normalized - 1.0) * (max_boost - sensitivity_factor))
 
     def set_volume_sensitivity(self, sensitivity: float) -> None:
-        """Установка чувствительности усиления (0.1 - 1.0)"""
         self._volume_sensitivity = sensitivity
 
     def is_active(self) -> bool:
