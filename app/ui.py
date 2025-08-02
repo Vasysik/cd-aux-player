@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QPixmap, QTransform, QColor
 from .audio import AudioManager
+from .settings_dialog import SettingsDialog
 
 
 class RotatingDisc(QWidget):
@@ -24,10 +25,12 @@ class RotatingDisc(QWidget):
         self.rotation_angle = 0.0
         self.target_speed = 0.0
         self.current_speed = 0.0
+        self._disc_sensitivity = 0.5
+        self._disc_inertia = 0.5
         self._disc_pixmap: Optional[QPixmap] = None
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_rotation)
-        self.timer.start(33)
+        self.timer.start(16)
         self._load_disc_image()
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
@@ -46,16 +49,23 @@ class RotatingDisc(QWidget):
             painter.drawEllipse(80, 80, 40, 40)
             painter.end()
 
+    def set_disc_sensitivity(self, sensitivity: float) -> None:
+        self._disc_sensitivity = sensitivity
+
+    def set_disc_inertia(self, inertia: float) -> None:
+        self._disc_inertia = inertia
+
     def set_audio_level(self, db_level: float) -> None:
         if db_level < -60:
             self.target_speed = 0.0
         else:
             normalized = min(1.0, max(0.0, (db_level + 60) / 60))
-            self.target_speed = normalized * 10.0
+            self.target_speed = normalized * 30.0 * self._disc_sensitivity
 
     def _update_rotation(self) -> None:
         speed_diff = self.target_speed - self.current_speed
-        self.current_speed += speed_diff * 0.1
+        smoothing = 0.02 + (0.48 * (1.0 - self._disc_inertia))
+        self.current_speed += speed_diff * smoothing
         self.rotation_angle += self.current_speed
         if self.rotation_angle >= 360:
             self.rotation_angle -= 360
@@ -85,6 +95,7 @@ class ControlPanel(QWidget):
     def __init__(self, audio_manager: AudioManager) -> None:
         super().__init__()
         self.audio_manager = audio_manager
+        self.settings_dialog = None
         self._setup_ui()
         self._connect_signals()
         self._refresh_devices()
@@ -108,7 +119,7 @@ class ControlPanel(QWidget):
         layout.addWidget(self.volume_label)
         self.eq_button = QPushButton("🎛️ EQ")
         layout.addWidget(self.eq_button)
-        self.settings_button = QPushButton("⚙️ Setup")
+        self.settings_button = QPushButton("⚙️ Настройки")
         layout.addWidget(self.settings_button)
 
     def _connect_signals(self) -> None:
@@ -119,7 +130,7 @@ class ControlPanel(QWidget):
 
     def _refresh_devices(self) -> None:
         self.device_combo.clear()
-        self.device_combo.addItem("Select Input Device", -1)
+        self.device_combo.addItem("Выберите устройство ввода", -1)
         for dev_id, name in self.audio_manager.get_input_devices():
             self.device_combo.addItem(name, dev_id)
 
@@ -138,10 +149,12 @@ class ControlPanel(QWidget):
         self.label_volume_emoji.setText("🔈" if value == 0 else "🔊")
 
     def _on_eq_clicked(self) -> None:
-        QMessageBox.information(self, "EQ", "🎛️ Equalizer coming soon!")
+        QMessageBox.information(self, "EQ", "🎛️ Эквалайзер в разработке!")
 
     def _on_settings_clicked(self) -> None:
-        QMessageBox.information(self, "Setup", "⚙️ Settings dialog TODO.")
+        self.settings_dialog = SettingsDialog(self)
+        self.settings_dialog.settings_changed.connect(self.parent().parent().apply_settings)
+        self.settings_dialog.exec()
 
 
 class MainWindow(QMainWindow):
@@ -154,6 +167,7 @@ class MainWindow(QMainWindow):
         self.audio_manager = AudioManager()
         self._setup_ui()
         self._connect_signals()
+        self._load_and_apply_settings()
 
     def _apply_dark_theme(self) -> None:
         self.setStyleSheet(
@@ -183,6 +197,25 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.audio_manager.rms_level_changed.connect(self.disc_widget.set_audio_level)
+
+    def _load_and_apply_settings(self) -> None:
+        try:
+            from .settings_dialog import SettingsDialog
+            dialog = SettingsDialog()
+            settings = dialog.get_settings()
+            self.apply_settings(settings)
+        except Exception:
+            pass
+
+    def apply_settings(self, settings: dict) -> None:
+        disc_sens = settings.get("disc_sensitivity", 50) / 100.0
+        self.disc_widget.set_disc_sensitivity(disc_sens)
+        
+        disc_inertia = settings.get("disc_inertia", 50) / 100.0
+        self.disc_widget.set_disc_inertia(disc_inertia)
+        
+        vol_sens = settings.get("volume_sensitivity", 50) / 100.0
+        self.audio_manager.set_volume_sensitivity(vol_sens)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
