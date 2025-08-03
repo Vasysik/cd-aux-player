@@ -117,6 +117,7 @@ class ControlPanel(QWidget):
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
+        self.volume_slider.setMinimumWidth(100)
         layout.addWidget(self.volume_slider)
         self.volume_label = QLabel("50 %")
         layout.addWidget(self.volume_label)
@@ -163,9 +164,13 @@ class ControlPanel(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("CD-AUX mini")
+        from app import __app_name__, __version__
+        self.setWindowTitle(f"{__app_name__} v{__version__}")
         self.setMinimumSize(400, 300)
         self.resize(600, 500)
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "disc.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         self._apply_dark_theme()
         self.audio_manager = AudioManager()
         self._setup_ui()
@@ -272,5 +277,3 @@ class MainWindow(QMainWindow):
         else:
             self.audio_manager.stop_stream()
             event.accept()
-
-

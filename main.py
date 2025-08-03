@@ -1,13 +1,13 @@
 import sys
 from PySide6.QtWidgets import QApplication
 from app.ui import MainWindow
-
+from app import __version__, __app_name__
 
 def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName("CD-AUX mini")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationName(__app_name__)
+    app.setApplicationVersion(__version__)
     app.setStyle("Fusion")
     
     window = MainWindow()
