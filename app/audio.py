@@ -46,6 +46,7 @@ class AudioManager(QObject):
         self._sample_rate = 44100
         self._format = QAudioFormat()
         self._channels = 2
+        self._buffer_size = 4096
         self._eq_frequencies = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         self._eq_gains: List[float] = [0.0] * len(self._eq_frequencies)
         self._fft_freqs_cache = {}
@@ -103,22 +104,26 @@ class AudioManager(QObject):
             self._input_device = new_input_device
             self._output_device = new_output_device
             
-            format = QAudioFormat()
-            format.setSampleRate(self._sample_rate)
-            format.setChannelCount(self._channels)
-            format.setSampleFormat(QAudioFormat.Int16)
-            
-            if not self._input_device.isFormatSupported(format):
-                format = self._input_device.preferredFormat()
-                self._channels = format.channelCount()
-                self._sample_rate = format.sampleRate()
-                self._fft_freqs_cache.clear()
+            format = self._input_device.preferredFormat()
+            if format.sampleFormat() != QAudioFormat.Int16:
+                test_format = QAudioFormat(format)
+                test_format.setSampleFormat(QAudioFormat.Int16)
+                if self._input_device.isFormatSupported(test_format):
+                    format = test_format
             
             self._format = format
             self._channels = min(format.channelCount(), 2)
             
+            new_sample_rate = format.sampleRate()
+            if new_sample_rate != self._sample_rate:
+                self._sample_rate = new_sample_rate
+                self._fft_freqs_cache.clear()
+            
             self._audio_source = QAudioSource(self._input_device, format, self)
             self._audio_sink = QAudioSink(self._output_device, format, self)
+            
+            self._audio_source.setBufferSize(self._buffer_size)
+            self._audio_sink.setBufferSize(self._buffer_size)
             
             self._io_device_out = self._audio_sink.start()
             io_device_in = self._audio_source.start()
