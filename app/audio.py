@@ -47,8 +47,11 @@ class AudioManager(QObject):
         self._chunk_size = 2048
         self._format = QAudioFormat()
         self._channels = 2
-        self._eq_gains: List[float] = [0.0, 0.0, 0.0, 0.0, 0.0]
-        self._eq_frequencies = [60, 250, 1000, 4000, 16000]
+        self._eq_frequencies = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+        self._eq_gains: List[float] = [0.0] * len(self._eq_frequencies)
+
+    def get_eq_frequencies(self) -> List[int]:
+        return self._eq_frequencies.copy()
 
     def get_input_devices(self) -> List[Tuple[int, str]]:
         devices: List[Tuple[int, str]] = []
@@ -146,7 +149,7 @@ class AudioManager(QObject):
                 if gain_db == 0.0:
                     continue
                 
-                q_factor = 1.0
+                q_factor = 1.414
                 bandwidth = center_freq / q_factor
                 lower = center_freq - bandwidth / 2
                 upper = center_freq + bandwidth / 2
@@ -217,7 +220,8 @@ class AudioManager(QObject):
         self._volume_sensitivity = sensitivity
 
     def set_eq_gains(self, gains: List[float]) -> None:
-        self._eq_gains = gains.copy()
+        if len(gains) == len(self._eq_gains):
+            self._eq_gains = gains.copy()
 
     def is_active(self) -> bool:
         return self._audio_source is not None and self._audio_source.state() == QAudio.ActiveState

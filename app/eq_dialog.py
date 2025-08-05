@@ -18,16 +18,27 @@ class EqDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("🎛️ Эквалайзер")
         self.setModal(False)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(800)
         self.setMinimumHeight(400)
         
-        self._frequencies = [60, 250, 1000, 4000, 16000]
-        self._freq_labels = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "16 kHz"]
+        from .audio import AudioManager
+        audio_manager = parent.audio_manager if hasattr(parent, 'audio_manager') else AudioManager()
+        self._frequencies = audio_manager.get_eq_frequencies()
+        self._freq_labels = self._create_freq_labels()
         self._sliders: List[QSlider] = []
         self._value_labels: List[QLabel] = []
         
         self._setup_ui()
         self._apply_dark_theme()
+    
+    def _create_freq_labels(self) -> List[str]:
+        labels = []
+        for freq in self._frequencies:
+            if freq < 1000:
+                labels.append(f"{freq} Hz")
+            else:
+                labels.append(f"{freq // 1000} kHz")
+        return labels
     
     def _setup_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -39,7 +50,7 @@ class EqDialog(QDialog):
         main_layout.addWidget(title_label)
         
         sliders_layout = QHBoxLayout()
-        sliders_layout.setSpacing(30)
+        sliders_layout.setSpacing(20)
         
         for i, freq_label in enumerate(self._freq_labels):
             freq_layout = QVBoxLayout()

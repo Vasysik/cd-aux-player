@@ -219,6 +219,9 @@ class MainWindow(QMainWindow):
             self._init_tray()
 
     def _init_tray(self) -> None:
+        if hasattr(self, "tray_icon"):
+            return
+            
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
         
@@ -249,8 +252,10 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _quit_app(self) -> None:
+        self.audio_manager.stop_stream()
         if hasattr(self, "tray_icon"):
             self.tray_icon.hide()
+            self.tray_icon.deleteLater()
         QApplication.quit()
 
     def _apply_dark_theme(self) -> None:
@@ -308,6 +313,7 @@ class MainWindow(QMainWindow):
             self._init_tray()
         elif not self._tray_enabled and hasattr(self, "tray_icon"):
             self.tray_icon.hide()
+            self.tray_icon.deleteLater()
             del self.tray_icon
 
     def resizeEvent(self, event) -> None:
@@ -327,4 +333,8 @@ class MainWindow(QMainWindow):
             event.ignore()
         else:
             self.audio_manager.stop_stream()
+            if hasattr(self, "tray_icon"):
+                self.tray_icon.hide()
+                self.tray_icon.deleteLater()
+            QApplication.quit()
             event.accept()
