@@ -44,11 +44,11 @@ class AudioManager(QObject):
         self._gain: float = 1.0
         self._volume_sensitivity: float = 0.5
         self._sample_rate = 44100
-        self._chunk_size = 2048
         self._format = QAudioFormat()
         self._channels = 2
         self._eq_frequencies = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         self._eq_gains: List[float] = [0.0] * len(self._eq_frequencies)
+        self._fft_freqs_cache = {}
 
     def get_eq_frequencies(self) -> List[int]:
         return self._eq_frequencies.copy()
@@ -77,22 +77,31 @@ class AudioManager(QObject):
 
     def start_stream(self, device_id: int, output_id: Optional[int] = None) -> bool:
         try:
-            self.stop_stream()
-            
             audio_devices = QMediaDevices.audioInputs()
             if device_id < 0 or device_id >= len(audio_devices):
                 return False
-                
-            self._input_device = audio_devices[device_id]
+            
+            new_input_device = audio_devices[device_id]
             
             if output_id is None:
-                self._output_device = QMediaDevices.defaultAudioOutput()
+                new_output_device = QMediaDevices.defaultAudioOutput()
             else:
                 output_devices = QMediaDevices.audioOutputs()
                 if output_id < 0 or output_id >= len(output_devices):
-                    self._output_device = QMediaDevices.defaultAudioOutput()
+                    new_output_device = QMediaDevices.defaultAudioOutput()
                 else:
-                    self._output_device = output_devices[output_id]
+                    new_output_device = output_devices[output_id]
+            
+            if (self._input_device == new_input_device and 
+                self._output_device == new_output_device and
+                self._audio_source is not None and
+                self._audio_source.state() != QAudio.StoppedState):
+                return True
+                
+            self.stop_stream()
+            
+            self._input_device = new_input_device
+            self._output_device = new_output_device
             
             format = QAudioFormat()
             format.setSampleRate(self._sample_rate)
@@ -103,6 +112,7 @@ class AudioManager(QObject):
                 format = self._input_device.preferredFormat()
                 self._channels = format.channelCount()
                 self._sample_rate = format.sampleRate()
+                self._fft_freqs_cache.clear()
             
             self._format = format
             self._channels = min(format.channelCount(), 2)
@@ -142,8 +152,13 @@ class AudioManager(QObject):
             return audio_data
         
         try:
+            data_len = len(audio_data)
+            
+            if data_len not in self._fft_freqs_cache:
+                self._fft_freqs_cache[data_len] = np.fft.rfftfreq(data_len, 1.0 / self._sample_rate)
+            
+            freqs = self._fft_freqs_cache[data_len]
             fft_data = np.fft.rfft(audio_data)
-            freqs = np.fft.rfftfreq(len(audio_data), 1.0 / self._sample_rate)
             
             for i, (center_freq, gain_db) in enumerate(zip(self._eq_frequencies, self._eq_gains)):
                 if gain_db == 0.0:
@@ -158,7 +173,7 @@ class AudioManager(QObject):
                 gain_linear = 10 ** (gain_db / 20)
                 fft_data[mask] *= gain_linear
             
-            return np.fft.irfft(fft_data, n=len(audio_data))
+            return np.fft.irfft(fft_data, n=data_len)
         except Exception as e:
             print(f"[Audio] EQ error: {e}")
             return audio_data
