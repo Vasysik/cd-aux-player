@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGroupBox,
     QDialogButtonBox,
+    QCheckBox,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -35,7 +36,9 @@ class SettingsDialog(QDialog):
         default_settings = {
             "disc_sensitivity": 50,
             "disc_inertia": 50,
-            "volume_sensitivity": 50
+            "volume_sensitivity": 50,
+            "tray_enabled": True,
+            "tray_notification": True
         }
         
         if os.path.exists(self.settings_file):
@@ -137,6 +140,20 @@ class SettingsDialog(QDialog):
         volume_layout.addLayout(volume_slider_layout)
         layout.addWidget(volume_group)
         
+        tray_group = QGroupBox("🔔 Поведение приложения")
+        tray_layout = QVBoxLayout(tray_group)
+        
+        self.tray_enabled_checkbox = QCheckBox("Разрешить сворачивание в системный трей")
+        self.tray_enabled_checkbox.setChecked(self.settings.get("tray_enabled", True))
+        tray_layout.addWidget(self.tray_enabled_checkbox)
+        
+        self.tray_notification_checkbox = QCheckBox("Показывать уведомление при сворачивании")
+        self.tray_notification_checkbox.setChecked(self.settings.get("tray_notification", True))
+        self.tray_notification_checkbox.setEnabled(self.settings.get("tray_enabled", True))
+        tray_layout.addWidget(self.tray_notification_checkbox)
+        
+        layout.addWidget(tray_group)
+        
         reset_button = QPushButton("🔄 Сбросить настройки")
         reset_button.clicked.connect(self._reset_settings)
         layout.addWidget(reset_button)
@@ -156,6 +173,9 @@ class SettingsDialog(QDialog):
         )
         self.volume_slider.valueChanged.connect(
             lambda v: self.volume_value_label.setText(f"{v}%")
+        )
+        self.tray_enabled_checkbox.toggled.connect(
+            self.tray_notification_checkbox.setEnabled
         )
     
     def _apply_dark_theme(self) -> None:
@@ -199,17 +219,26 @@ class SettingsDialog(QDialog):
                 background: #505050; 
             }
             QLabel { color: #ffffff; }
+            QCheckBox { color: #ffffff; }
+            QCheckBox::indicator { width: 18px; height: 18px; }
+            QCheckBox::indicator:unchecked { background: #404040; border: 1px solid #606060; border-radius: 3px; }
+            QCheckBox::indicator:checked { background: #0078d4; border: 1px solid #0078d4; border-radius: 3px; }
+            QCheckBox::indicator:checked:disabled { background: #505050; }
         """)
     
     def _reset_settings(self) -> None:
         self.disc_slider.setValue(50)
         self.inertia_slider.setValue(50)
         self.volume_slider.setValue(50)
+        self.tray_enabled_checkbox.setChecked(True)
+        self.tray_notification_checkbox.setChecked(True)
     
     def _on_accept(self) -> None:
         self.settings["disc_sensitivity"] = self.disc_slider.value()
         self.settings["disc_inertia"] = self.inertia_slider.value()
         self.settings["volume_sensitivity"] = self.volume_slider.value()
+        self.settings["tray_enabled"] = self.tray_enabled_checkbox.isChecked()
+        self.settings["tray_notification"] = self.tray_notification_checkbox.isChecked()
         self._save_settings()
         self.settings_changed.emit(self.settings)
         self.accept()

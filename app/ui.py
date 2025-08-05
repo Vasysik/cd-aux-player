@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QPixmap, QTransform, QColor, QIcon
 from .audio import AudioManager
 from .settings_dialog import SettingsDialog
+from .eq_dialog import EqDialog
 
 
 class RotatingDisc(QWidget):
@@ -99,6 +100,9 @@ class ControlPanel(QWidget):
         super().__init__()
         self.audio_manager = audio_manager
         self.settings_dialog = None
+        self.eq_dialog = None
+        self._current_input_id = -1
+        self._current_output_id = None
         self._setup_ui()
         self._connect_signals()
         self._refresh_devices()
@@ -107,27 +111,42 @@ class ControlPanel(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(12)
+        
         self.label_input = QLabel("🎙️")
         layout.addWidget(self.label_input)
+        
         self.device_combo = QComboBox()
         self.device_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         layout.addWidget(self.device_combo, stretch=2)
+        
+        self.label_output = QLabel("🔈")
+        layout.addWidget(self.label_output)
+        
+        self.output_combo = QComboBox()
+        self.output_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        layout.addWidget(self.output_combo, stretch=2)
+        
         self.label_volume_emoji = QLabel("🔊")
         layout.addWidget(self.label_volume_emoji)
+        
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
         self.volume_slider.setMinimumWidth(100)
         layout.addWidget(self.volume_slider)
+        
         self.volume_label = QLabel("50 %")
         layout.addWidget(self.volume_label)
+        
         self.eq_button = QPushButton("🎛️ EQ")
         layout.addWidget(self.eq_button)
+        
         self.settings_button = QPushButton("⚙️ Настройки")
         layout.addWidget(self.settings_button)
 
     def _connect_signals(self) -> None:
         self.device_combo.currentIndexChanged.connect(self._on_device_changed)
+        self.output_combo.currentIndexChanged.connect(self._on_output_changed)
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         self.eq_button.clicked.connect(self._on_eq_clicked)
         self.settings_button.clicked.connect(self._on_settings_clicked)
@@ -137,15 +156,28 @@ class ControlPanel(QWidget):
         self.device_combo.addItem("Выберите устройство ввода", -1)
         for dev_id, name in self.audio_manager.get_input_devices():
             self.device_combo.addItem(name, dev_id)
+        
+        self.output_combo.clear()
+        self.output_combo.addItem("По умолчанию (системное)", None)
+        for dev_id, name in self.audio_manager.get_output_devices():
+            self.output_combo.addItem(name, dev_id)
 
     def _on_device_changed(self) -> None:
         device_id = self.device_combo.currentData()
+        self._current_input_id = device_id
         if device_id == -1:
             self.audio_manager.stop_stream()
         else:
-            if not self.audio_manager.start_stream(int(device_id)):
+            if not self.audio_manager.start_stream(int(device_id), self._current_output_id):
                 QMessageBox.warning(self, "Audio Error", "Cannot start stream.")
                 self.device_combo.setCurrentIndex(0)
+
+    def _on_output_changed(self) -> None:
+        output_id = self.output_combo.currentData()
+        self._current_output_id = output_id
+        if self._current_input_id != -1:
+            if not self.audio_manager.start_stream(self._current_input_id, self._current_output_id):
+                QMessageBox.warning(self, "Audio Error", "Cannot restart stream with new output.")
 
     def _on_volume_changed(self, value: int) -> None:
         self.volume_label.setText(f"{value} %")
@@ -153,7 +185,12 @@ class ControlPanel(QWidget):
         self.label_volume_emoji.setText("🔈" if value == 0 else "🔊")
 
     def _on_eq_clicked(self) -> None:
-        QMessageBox.information(self, "EQ", "🎛️ Эквалайзер в разработке!")
+        if self.eq_dialog is None:
+            self.eq_dialog = EqDialog(self)
+            self.eq_dialog.eq_changed.connect(self.audio_manager.set_eq_gains)
+        self.eq_dialog.show()
+        self.eq_dialog.raise_()
+        self.eq_dialog.activateWindow()
 
     def _on_settings_clicked(self) -> None:
         self.settings_dialog = SettingsDialog(self)
@@ -173,10 +210,13 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         self._apply_dark_theme()
         self.audio_manager = AudioManager()
+        self._tray_enabled = True
+        self._tray_notification = True
         self._setup_ui()
         self._connect_signals()
         self._load_and_apply_settings()
-        self._init_tray()
+        if self._tray_enabled:
+            self._init_tray()
 
     def _init_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -209,7 +249,8 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _quit_app(self) -> None:
-        self.tray_icon.hide()
+        if hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
         QApplication.quit()
 
     def _apply_dark_theme(self) -> None:
@@ -259,20 +300,30 @@ class MainWindow(QMainWindow):
         
         vol_sens = settings.get("volume_sensitivity", 50) / 100.0
         self.audio_manager.set_volume_sensitivity(vol_sens)
+        
+        self._tray_enabled = settings.get("tray_enabled", True)
+        self._tray_notification = settings.get("tray_notification", True)
+        
+        if self._tray_enabled and not hasattr(self, "tray_icon"):
+            self._init_tray()
+        elif not self._tray_enabled and hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
+            del self.tray_icon
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
 
     def closeEvent(self, event) -> None:
-        if hasattr(self, "tray_icon") and self.tray_icon.isVisible():
+        if self._tray_enabled and hasattr(self, "tray_icon") and self.tray_icon.isVisible():
             self.hide()
-            self.tray_icon.showMessage(
-                "CD-AUX mini",
-                "Приложение продолжает работать в трее.\n"
-                "Кликните по иконке, чтобы вернуть окно.",
-                QSystemTrayIcon.Information,
-                3000,
-            )
+            if self._tray_notification:
+                self.tray_icon.showMessage(
+                    "CD-AUX mini",
+                    "Приложение продолжает работать в трее.\n"
+                    "Кликните по иконке, чтобы вернуть окно.",
+                    QSystemTrayIcon.Information,
+                    3000,
+                )
             event.ignore()
         else:
             self.audio_manager.stop_stream()

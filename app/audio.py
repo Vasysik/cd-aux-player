@@ -47,6 +47,8 @@ class AudioManager(QObject):
         self._chunk_size = 2048
         self._format = QAudioFormat()
         self._channels = 2
+        self._eq_gains: List[float] = [0.0, 0.0, 0.0, 0.0, 0.0]
+        self._eq_frequencies = [60, 250, 1000, 4000, 16000]
 
     def get_input_devices(self) -> List[Tuple[int, str]]:
         devices: List[Tuple[int, str]] = []
@@ -59,7 +61,18 @@ class AudioManager(QObject):
             print("[Audio] Error querying devices:", e)
         return devices
 
-    def start_stream(self, device_id: int) -> bool:
+    def get_output_devices(self) -> List[Tuple[int, str]]:
+        devices: List[Tuple[int, str]] = []
+        try:
+            audio_devices = QMediaDevices.audioOutputs()
+            for i, device in enumerate(audio_devices):
+                name = _normalize_device_name(device.description())
+                devices.append((i, name))
+        except Exception as e:
+            print("[Audio] Error querying output devices:", e)
+        return devices
+
+    def start_stream(self, device_id: int, output_id: Optional[int] = None) -> bool:
         try:
             self.stop_stream()
             
@@ -68,7 +81,15 @@ class AudioManager(QObject):
                 return False
                 
             self._input_device = audio_devices[device_id]
-            self._output_device = QMediaDevices.defaultAudioOutput()
+            
+            if output_id is None:
+                self._output_device = QMediaDevices.defaultAudioOutput()
+            else:
+                output_devices = QMediaDevices.audioOutputs()
+                if output_id < 0 or output_id >= len(output_devices):
+                    self._output_device = QMediaDevices.defaultAudioOutput()
+                else:
+                    self._output_device = output_devices[output_id]
             
             format = QAudioFormat()
             format.setSampleRate(self._sample_rate)
@@ -113,6 +134,32 @@ class AudioManager(QObject):
         except Exception as e:
             print("[Audio] Error stopping stream:", e)
 
+    def _apply_eq(self, audio_data: np.ndarray) -> np.ndarray:
+        if all(g == 0.0 for g in self._eq_gains):
+            return audio_data
+        
+        try:
+            fft_data = np.fft.rfft(audio_data)
+            freqs = np.fft.rfftfreq(len(audio_data), 1.0 / self._sample_rate)
+            
+            for i, (center_freq, gain_db) in enumerate(zip(self._eq_frequencies, self._eq_gains)):
+                if gain_db == 0.0:
+                    continue
+                
+                q_factor = 1.0
+                bandwidth = center_freq / q_factor
+                lower = center_freq - bandwidth / 2
+                upper = center_freq + bandwidth / 2
+                
+                mask = (freqs >= lower) & (freqs <= upper)
+                gain_linear = 10 ** (gain_db / 20)
+                fft_data[mask] *= gain_linear
+            
+            return np.fft.irfft(fft_data, n=len(audio_data))
+        except Exception as e:
+            print(f"[Audio] EQ error: {e}")
+            return audio_data
+
     def _process_audio(self, io_device_in) -> None:
         try:
             data: QByteArray = io_device_in.readAll()
@@ -135,6 +182,15 @@ class AudioManager(QObject):
             self.rms_level_changed.emit(db_level)
             
             audio_float *= self._gain
+            
+            if self._channels == 2:
+                left_eq = self._apply_eq(audio_float[0::2])
+                right_eq = self._apply_eq(audio_float[1::2])
+                audio_float[0::2] = left_eq
+                audio_float[1::2] = right_eq
+            else:
+                audio_float = self._apply_eq(audio_float)
+            
             audio_float = np.clip(audio_float, -1.0, 1.0)
             output_data = (audio_float * 32767).astype(np.int16)
             
@@ -159,6 +215,9 @@ class AudioManager(QObject):
 
     def set_volume_sensitivity(self, sensitivity: float) -> None:
         self._volume_sensitivity = sensitivity
+
+    def set_eq_gains(self, gains: List[float]) -> None:
+        self._eq_gains = gains.copy()
 
     def is_active(self) -> bool:
         return self._audio_source is not None and self._audio_source.state() == QAudio.ActiveState
