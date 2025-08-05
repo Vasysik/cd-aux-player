@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QCheckBox,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QStandardPaths
 
 
 class SettingsDialog(QDialog):
@@ -22,12 +22,13 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("⚙️ Настройки")
         self.setModal(True)
         self.setMinimumWidth(450)
-        
-        self.settings_file = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), 
-            "settings.json"
-        )
-        
+
+        app_cfg_dir = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+        if not app_cfg_dir:
+            app_cfg_dir = os.path.expanduser("~/.config")
+        os.makedirs(app_cfg_dir, exist_ok=True)
+        self.settings_file = os.path.join(app_cfg_dir, "settings.json")
+
         self.settings = self._load_settings()
         self._setup_ui()
         self._apply_dark_theme()
